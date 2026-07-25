@@ -171,7 +171,7 @@ func (b *Builder) build() error {
 	args := []string{"build"}
 	env := os.Environ()
 
-	ldFlags := extractLdflagsFromGoFlags()
+	ldFlags := ldflagsFromGoFlags()
 	if goos == "windows" {
 		ldFlags += " -H=windowsgui"
 	}
@@ -421,40 +421,83 @@ func appendEnv(env *[]string, varName, value string) {
 	*env = append(*env, varName+"="+value)
 }
 
-func extractLdflagsFromGoFlags() string {
-	goFlags := os.Getenv("GOFLAGS")
-
-	ldFlags, goFlags := extractLdFlags(goFlags)
-	if goFlags != "" {
-		os.Setenv("GOFLAGS", goFlags)
-	} else {
-		os.Unsetenv("GOFLAGS")
-	}
-
-	return ldFlags
+// ldflagsFromGoFlags returns the linker flags set in GOFLAGS. GOFLAGS is left
+// alone, as a -ldflags on the command line replaces the one it holds.
+func ldflagsFromGoFlags() string {
+	return extractLdFlags(os.Getenv("GOFLAGS"))
 }
 
-func extractLdFlags(goFlags string) (string, string) {
-	if goFlags == "" {
-		return "", ""
+// extractLdFlags returns the linker flags in a GOFLAGS value, merged so that
+// every -X applies. An unparsable value yields none, for the go command to report.
+func extractLdFlags(goFlags string) string {
+	entries, err := splitGoFlags(goFlags)
+	if err != nil {
+		return ""
 	}
 
-	flags := strings.Fields(goFlags)
-	ldflags := ""
-	newGoFlags := ""
-
-	for _, flag := range flags {
-		if strings.HasPrefix(flag, "-ldflags=") {
-			ldflags += strings.TrimPrefix(flag, "-ldflags=") + " "
-		} else {
-			newGoFlags += flag + " "
+	var ldflags []string
+	for _, entry := range entries {
+		value, found := ldFlagsValue(entry)
+		if !found {
+			continue
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			ldflags = append(ldflags, value)
 		}
 	}
 
-	ldflags = strings.TrimSpace(ldflags)
-	newGoFlags = strings.TrimSpace(newGoFlags)
+	return strings.Join(ldflags, " ")
+}
 
-	return ldflags, newGoFlags
+// ldFlagsValue returns the flags an -ldflags entry sets, in either dash spelling.
+func ldFlagsValue(entry string) (string, bool) {
+	if strings.HasPrefix(entry, "--") {
+		entry = entry[1:]
+	}
+	if !strings.HasPrefix(entry, "-ldflags=") {
+		return "", false
+	}
+
+	return strings.TrimPrefix(entry, "-ldflags="), true
+}
+
+// splitGoFlags splits a GOFLAGS value the way the go command does, allowing a
+// quoted run around an entry. Quotes inside an entry do not count.
+func splitGoFlags(goFlags string) ([]string, error) {
+	var entries []string
+	for len(goFlags) > 0 {
+		for len(goFlags) > 0 && isGoFlagsSpace(goFlags[0]) {
+			goFlags = goFlags[1:]
+		}
+		if len(goFlags) == 0 {
+			break
+		}
+
+		if quote := goFlags[0]; quote == '\'' || quote == '"' {
+			goFlags = goFlags[1:]
+			end := strings.IndexByte(goFlags, quote)
+			if end < 0 {
+				return nil, fmt.Errorf("unterminated %c in GOFLAGS", quote)
+			}
+			entries = append(entries, goFlags[:end])
+			goFlags = goFlags[end+1:]
+			continue
+		}
+
+		end := 0
+		for end < len(goFlags) && !isGoFlagsSpace(goFlags[end]) {
+			end++
+		}
+		entries = append(entries, goFlags[:end])
+		goFlags = goFlags[end:]
+	}
+
+	return entries, nil
+}
+
+// isGoFlagsSpace reports whether c separates two GOFLAGS entries.
+func isGoFlagsSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
 }
 
 func normaliseVersion(str string) string {

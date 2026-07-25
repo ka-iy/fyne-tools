@@ -97,10 +97,6 @@ func goAndroidBuild(pkg *packages.Package, bundleID string, androidArchs []strin
 		if err := mkdir(filepath.Dir(libAbsPath)); err != nil {
 			return nil, err
 		}
-		// If building release and no ldflags are set then remove the useless debug and DWARF build options
-		if release && buildLdflags == "" {
-			buildLdflags = "-w" // gomobile requires symbol check, so "-s" cannot be used yet - TODO resolve this
-		}
 		err = goBuild(
 			pkg.PkgPath,
 			append(env, androidEnv[arch]...),
