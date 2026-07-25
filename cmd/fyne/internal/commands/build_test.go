@@ -165,22 +165,51 @@ func Test_AppendEnv(t *testing.T) {
 type extractTest struct {
 	value       string
 	wantLdFlags string
-	wantGoFlags string
 }
 
 func Test_ExtractLdFlags(t *testing.T) {
 	goFlagsTests := []extractTest{
-		{"-ldflags=-w", "-w", ""},
-		{"-ldflags=-s", "-s", ""},
-		{"-ldflags=-w -ldflags=-s", "-w -s", ""},
-		{"-mod=vendor", "", "-mod=vendor"},
+		{"-ldflags=-w", "-w"},
+		{"-ldflags=-s", "-s"},
+		{"-ldflags=-w -ldflags=-s", "-w -s"},
+		{"-mod=vendor", ""},
+		{"", ""},
+
+		// entries are merged, so every -X applies
+		{"-ldflags=-X=main.a=1 -ldflags=-X=main.b=2", "-X=main.a=1 -X=main.b=2"},
+		{"-mod=vendor -ldflags=-X=main.a=1 -trimpath", "-X=main.a=1"},
+		{"-ldflags=-w\t-mod=vendor\n-x", "-w"},
+		{"-ldflags= -mod=vendor", ""},
+
+		// double dash spelling counts too
+		{"--ldflags=-X=main.a=1", "-X=main.a=1"},
+		{"--ldflags=-w -ldflags=-s", "-w -s"},
+		{"--mod=vendor", ""},
+
+		// quoted entries keep their spaces
+		{"'-ldflags=-X main.version=1.2.3'", "-X main.version=1.2.3"},
+		{"'-ldflags=-X main.a=1' -ldflags=-X=main.b=2", "-X main.a=1 -X=main.b=2"},
+		{`"-ldflags=-X main.a=1"`, "-X main.a=1"},
+		{"'-gcflags=all=-N -l' -ldflags=-w", "-w"},
+
+		// unparsable value yields nothing
+		{"'-ldflags=-w", ""},
+		{`"-ldflags=-w`, ""},
 	}
 
 	for _, test := range goFlagsTests {
-		ldFlags, goFlags := extractLdFlags(test.value)
-		assert.Equal(t, test.wantLdFlags, ldFlags)
-		assert.Equal(t, test.wantGoFlags, goFlags)
+		assert.Equal(t, test.wantLdFlags, extractLdFlags(test.value), "ldflags of %q", test.value)
 	}
+}
+
+func Test_LdflagsFromGoFlags(t *testing.T) {
+	goFlags := "'-ldflags=-X main.version=1.2.3' -mod=vendor"
+	t.Setenv("GOFLAGS", goFlags)
+
+	// the windows packager builds twice in one process, so both must see the flags
+	assert.Equal(t, "-X main.version=1.2.3", ldflagsFromGoFlags())
+	assert.Equal(t, "-X main.version=1.2.3", ldflagsFromGoFlags())
+	assert.Equal(t, goFlags, os.Getenv("GOFLAGS"))
 }
 
 func Test_NormaliseVersion(t *testing.T) {

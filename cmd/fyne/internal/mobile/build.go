@@ -231,18 +231,23 @@ var (
 	buildTags       stringsFlag // -tags
 )
 
-// RunNewBuild executes a new mobile build for the specified configuration
+// buildStripDWARF adds -w to the link, for builds that ship and for iOS.
+var buildStripDWARF bool
+
+// RunNewBuild executes a new mobile build for the specified configuration.
+// The build adds the linker flags it needs to the given ldflags.
 func RunNewBuild(target, appID, icon, name, version string, build int, release, distribution bool, cert, profile string,
-	tags []string, iconFG, iconBG, iconMono string,
+	tags []string, iconFG, iconBG, iconMono, ldflags string,
 ) error {
+	shipping := release || distribution
+
 	buildTarget = target
 	buildBundleID = appID
 	buildRelease = distribution
 	buildTags = tags
-	if release {
-		buildLdflags = "-w"
-		buildTrimpath = true
-	}
+	buildLdflags = strings.TrimSpace(ldflags)
+	buildStripDWARF = shipping
+	buildTrimpath = shipping
 
 	cmd := cmdBuild
 	cmd.Flag = flag.FlagSet{}
@@ -286,6 +291,20 @@ func init() {
 	addBuildFlagsNVXWork(cmdBuild)
 }
 
+// ldflagsFor adds the flags a mobile build needs to the user's. -s is undone
+// because extractPkgs reads the symbol table, and -w drops the DWARF data.
+func ldflagsFor(ldflags string, stripDWARF bool) string {
+	var flags []string
+	if ldflags != "" {
+		flags = append(flags, ldflags, "-s=false")
+	}
+	if stripDWARF {
+		flags = append(flags, "-w")
+	}
+
+	return strings.Join(flags, " ")
+}
+
 func goBuild(src string, env []string, args ...string) error {
 	return goCmd("build", []string{src}, env, args...)
 }
@@ -322,8 +341,8 @@ func goCmdAt(at string, subcmd string, srcs []string, env []string, args ...stri
 	if buildGcflags != "" {
 		cmd.Args = append(cmd.Args, "-gcflags", buildGcflags)
 	}
-	if buildLdflags != "" {
-		cmd.Args = append(cmd.Args, "-ldflags", buildLdflags)
+	if ldflags := ldflagsFor(buildLdflags, buildStripDWARF); ldflags != "" {
+		cmd.Args = append(cmd.Args, "-ldflags", ldflags)
 	}
 	if buildTrimpath {
 		cmd.Args = append(cmd.Args, "-trimpath")

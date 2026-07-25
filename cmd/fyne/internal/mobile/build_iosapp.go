@@ -25,6 +25,8 @@ func goIOSBuild(pkg *packages.Package, bundleID string, archs []string,
 ) (map[string]bool, error) {
 	src := pkg.PkgPath
 	buildO = rfc1034Label(appName) + ".app"
+	// Disable DWARF; see golang.org/issues/25148.
+	buildStripDWARF = true
 	// Detect the team ID
 	teamID, err := DetectIOSTeamID(cert)
 	if err != nil {
@@ -92,8 +94,7 @@ func goIOSBuild(pkg *packages.Package, bundleID string, archs []string,
 	var nmpkgs map[string]bool
 	for _, arch := range archs {
 		path := filepath.Join(tmpdir, arch)
-		// Disable DWARF; see golang.org/issues/25148.
-		if err := goBuild(src, darwinEnv[arch], "-ldflags=-w", "-o="+path); err != nil {
+		if err := goBuild(src, darwinEnv[arch], "-o="+path); err != nil {
 			return nil, err
 		}
 		if nmpkgs == nil {
